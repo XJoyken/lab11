@@ -1,0 +1,22 @@
+{
+    "sqltools.connections": [
+        {
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "phonebook2",
+            "database": "phonebook_2",
+            "username": "postgres"
+        },
+        {
+            "previewLimit": 50,
+            "server": "localhost",
+            "port": 5432,
+            "driver": "PostgreSQL",
+            "name": "phonebook_2",
+            "database": "phonebook_2",
+            "username": "postgres"
+        }
+    ]
+}

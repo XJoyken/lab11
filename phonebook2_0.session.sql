@@ -1,0 +1,1 @@
+SELECT * FROM phonebook2_0;
