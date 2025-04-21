@@ -38,7 +38,195 @@ def create_phonebook2_table():
     finally:
         cur.close()
         conn.close()
-        
+
+def create_search_function():
+    conn = connect_db()
+    if conn is None:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE OR REPLACE FUNCTION search_phonebook(pattern TEXT)
+            RETURNS TABLE (
+                id INTEGER,
+                first_name VARCHAR,
+                last_name VARCHAR,
+                phone VARCHAR
+            )
+            AS $$
+            BEGIN
+                RETURN QUERY
+                SELECT p.id, p.first_name, p.last_name, p.phone
+                FROM phonebook_2 p
+                WHERE p.first_name ILIKE '%' || pattern || '%'
+                   OR p.last_name ILIKE '%' || pattern || '%'
+                   OR p.phone ILIKE '%' || pattern || '%';
+            END;
+            $$ LANGUAGE plpgsql;
+        """)
+        conn.commit()
+        print("search_phonebook function created or updated.")
+    except Exception as e:
+        print(f"Function creation error: {e}")
+    finally:
+        cur.close()
+        conn.close()
+
+       
+def insert_or_update_user():
+    conn = connect_db()
+    if conn is None:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE OR REPLACE FUNCTION insert_or_update_user(p_first_name VARCHAR, p_last_name VARCHAR, p_phone VARCHAR)
+            RETURNS VOID
+            AS $$
+            BEGIN
+                INSERT INTO phonebook_2 (first_name, last_name, phone)
+                VALUES (p_first_name, p_last_name, p_phone)
+                ON CONFLICT (first_name)
+                DO UPDATE SET last_name = EXCLUDED.last_name, phone = EXCLUDED.phone;
+            END;
+            $$ LANGUAGE plpgsql;
+            """)
+        conn.commit()
+        print("insert_or_update_user function created or updated.")
+    except Exception as e:
+        print(f"Function creation error: {e}")
+    finally:
+        cur.close()
+        conn.close()      
+
+# CREATE OR REPLACE PROCEDURE insert_or_update_user(
+#     p_first_name VARCHAR, 
+#     p_last_name VARCHAR, 
+#     p_phone VARCHAR
+# )
+# LANGUAGE plpgsql
+# AS $$
+# BEGIN
+#     INSERT INTO phonebook_2 (first_name, last_name, phone)
+#     VALUES (p_first_name, p_last_name, p_phone)
+#     ON CONFLICT (first_name)
+#     DO UPDATE 
+#     SET last_name = EXCLUDED.last_name, phone = EXCLUDED.phone;
+# END;
+# $$;
+
+def insert_many_users():
+    conn = connect_db()
+    if conn is None:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE OR REPLACE PROCEDURE insert_many_users(
+                IN names TEXT[],
+                IN phones TEXT[],
+                OUT bad_data TEXT[]
+            )
+            LANGUAGE plpgsql
+            AS $$
+            DECLARE
+                i INTEGER := 1;
+                entry TEXT;
+            BEGIN
+                bad_data := ARRAY[]::TEXT[];
+                WHILE i <= array_length(names, 1) LOOP
+                    IF phones[i] ~ '^\+?\d{10,15}$' THEN
+                        PERFORM insert_or_update_user(names[i], NULL, phones[i]);
+                    ELSE
+                        entry := names[i] || ' — ' || phones[i];
+                        bad_data := array_append(bad_data, entry);
+                    END IF;
+                    i := i + 1;
+                END LOOP;
+            END;
+            $$;
+            """)
+        conn.commit()
+        print("insert_many_users procedure created or updated.")
+    except Exception as e:
+        print(f"Function creation error: {e}")
+    finally:
+        cur.close()
+        conn.close() 
+       
+def get_phonebook_paginated():
+    conn = connect_db()
+    if conn is None:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE OR REPLACE FUNCTION get_phonebook_paginated(
+                p_limit INTEGER,
+                p_offset INTEGER
+            )
+            RETURNS TABLE (
+                id INTEGER,
+                first_name VARCHAR,
+                last_name VARCHAR,
+                phone VARCHAR
+            )
+            AS $$
+            BEGIN
+                RETURN QUERY
+                SELECT p.id, p.first_name, p.last_name, p.phone
+                FROM phonebook_2 p
+                ORDER BY p.id
+                LIMIT p_limit OFFSET p_offset;
+            END;
+            $$ LANGUAGE plpgsql;
+            """)
+        conn.commit()
+        print("get_phonebook_paginated function created or updated.")
+    except Exception as e:
+        print(f"Function creation error: {e}")
+    finally:
+        cur.close()
+        conn.close() 
+
+def delete_from_phonebook_procedure():
+    conn = connect_db()
+    if conn is None:
+        return
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE OR REPLACE PROCEDURE delete_from_phonebook(
+                p_username VARCHAR,
+                p_phone VARCHAR
+            )
+            LANGUAGE plpgsql
+            AS $$
+            BEGIN
+                IF p_username IS NOT NULL THEN
+                    DELETE FROM phonebook_2 WHERE first_name = p_username;
+                    RAISE NOTICE 'Deleted records with first_name: %', p_username;
+                END IF;
+
+                IF p_phone IS NOT NULL THEN
+                    DELETE FROM phonebook_2 WHERE phone = p_phone;
+                    RAISE NOTICE 'Deleted records with phone: %', p_phone;
+                END IF;
+                
+                IF NOT FOUND THEN
+                    RAISE NOTICE 'No records found for deletion.';
+                END IF;
+            END;
+            $$;
+            """)
+        conn.commit()
+        print("delete_from_phonebook procedure created or updated.")
+    except Exception as e:
+        print(f"Function creation error: {e}")
+    finally:
+        cur.close()
+        conn.close() 
+
 def insert_from_csv(file_path):
     conn = connect_db()
     if conn is None:
@@ -49,12 +237,7 @@ def insert_from_csv(file_path):
             reader = csv.reader(f)
             next(reader)
             for row in reader:
-                cur.execute("""
-                    INSERT INTO phonebook_2 (first_name, last_name, phone)
-                    VALUES (%s, %s, %s)
-                    ON CONFLICT (first_name)
-                    DO UPDATE SET last_name = EXCLUDED.last_name, phone = EXCLUDED.phone
-                """, (row[0], row[1], row[2]))
+                cur.execute("SELECT insert_or_update_user(%s, %s, %s)", (row[0], row[1], row[2]))
         conn.commit()
         print("Data from CSV loaded successfully.")
     except Exception as e:
@@ -62,6 +245,7 @@ def insert_from_csv(file_path):
     finally:
         cur.close()
         conn.close()
+
 
 # INSERT INTO phonebook_2 (first_name, last_name, phone)
 #                     VALUES (%s, %s, %s)
@@ -77,12 +261,7 @@ def insert_from_console():
         first_name = input("Enter first name: ")
         last_name = input("Enter last name (or leave empty): ")
         phone = input("Enter phone number: ")
-        cur.execute("""
-            INSERT INTO phonebook_2 (first_name, last_name, phone)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (first_name)
-            DO UPDATE SET phone = EXCLUDED.phone, last_name = EXCLUDED.last_name
-            """, (first_name, last_name, phone))
+        cur.execute("SELECT insert_or_update_user(%s, %s, %s)", (first_name, last_name, phone))
         conn.commit()
         print("Data added successfully.")
     except Exception as e:
@@ -128,32 +307,16 @@ def query_phonebook():
         return
     try:
         cur = conn.cursor()
-        print("Filters: 1 - by first name, 2 - by surname, 3 - by phone, 4 - all records")
-        choice = input("Choose (1, 2, 3, 4): ")
-        
+        print("Filters: 1 - by pattern (first name, last name, phone), 2 - all records.")
+        choice = input("Choose (1, 2): ")
         if choice == "1":
-            name = input("Enter first name to search: ")
-            cur.execute("""
-                        SELECT * FROM phonebook_2 WHERE first_name ILIKE %s
-                        """, (f"%{name}%",))
+            pattern = input("Enter search pattern (part of first name, last name or phone): ")
+            cur.execute("SELECT * FROM search_phonebook(%s)", (pattern,))
         elif choice == "2":
-            last_name = input("Enter surname to search: ")
-            cur.execute("""
-                        SELECT * FROM phonebook_2 WHERE last_name ILIKE %s
-                        """, (f"%{last_name}%",))    
-        elif choice == "3":
-            phone = input("Enter phone to search: ")
-            cur.execute("""
-                        SELECT * FROM phonebook_2 WHERE phone ILIKE %s
-                        """, (f"%{phone}%",))
-        elif choice == "4":
-            cur.execute("""
-                        SELECT * FROM phonebook_2
-                        """)
+            cur.execute("SELECT * FROM phonebook_2")
         else:
             print("Invalid choice")
             return
-        
         rows = cur.fetchall()
         if not rows:
             print("No records found.")
@@ -183,28 +346,19 @@ def bulk_insert_users(user_list):
         return
     try:
         cur = conn.cursor()
-        bad_entries = []
-
-        for first_name, phone in user_list:
-            if not (phone.isdigit() or (phone.startswith('+') and phone[1:].isdigit())) or not (10 <= len(phone) <= 15):
-                bad_entries.append((first_name, phone))
-                continue
-
-            cur.execute("SELECT * FROM phonebook_2 WHERE phone = %s", (phone,))
-            if cur.fetchone():
-                continue
-
-            cur.execute("SELECT * FROM phonebook_2 WHERE first_name = %s", (first_name,))
-            if cur.fetchone():
-                cur.execute("UPDATE phonebook_2 SET phone = %s WHERE first_name = %s", (phone, first_name))
-            else:
-                cur.execute("INSERT INTO phonebook_2 (first_name, phone) VALUES (%s, %s)", (first_name, phone))
-        
+        names = [name for name, _ in user_list]
+        phones = [phone for _, phone in user_list]
+        cur.execute("""
+            CALL insert_many_users(%s, %s, %s)
+        """, (names, phones, None))
         conn.commit()
+        cur.execute("SELECT * FROM unnest(%s::text[])", (cur.fetchone()[0],)) #разворачивает массив в строку
+        bad_entries = cur.fetchall()
+
         if bad_entries:
             print("Incorrect entries:")
-            for name, phone in bad_entries:
-                print(f"{name} — {phone}")
+            for entry in bad_entries:
+                print(entry[0])
         else:
             print("All users inserted/updated successfully.")
     except Exception as e:
@@ -212,6 +366,7 @@ def bulk_insert_users(user_list):
     finally:
         cur.close()
         conn.close()
+
 
 def paginated_query():
     conn = connect_db()
@@ -223,7 +378,7 @@ def paginated_query():
 
         cur = conn.cursor()
         cur.execute("""
-            SELECT * FROM phonebook_2 ORDER BY id LIMIT %s OFFSET %s
+            SELECT * FROM get_phonebook_paginated(%s, %s);
         """, (limit, offset))
 
         rows = cur.fetchall()
@@ -246,37 +401,35 @@ def delete_from_phonebook():
         cur = conn.cursor()
         print("Delete by: 1 - first name, 2 - phone")
         choice = input("Choose (1 or 2): ")
-        
+
         if choice == '1':
             name = input("Enter first name to delete: ")
-            cur.execute(
-                "DELETE FROM phonebook_2 WHERE first_name = %s",
-                (name,)
-            )
+            cur.execute("CALL delete_from_phonebook(%s, NULL);", (name,))
         elif choice == '2':
             phone = input("Enter phone to delete: ")
-            cur.execute(
-                "DELETE FROM phonebook_2 WHERE phone = %s",
-                (phone,)
-            )
+            cur.execute("CALL delete_from_phonebook(NULL, %s);", (phone,))
         else:
             print("Invalid choice.")
             return
         
-        if cur.rowcount == 0:
-            print("No records found.")
-        else:
-            conn.commit()
-            print(f"Deleted records: {cur.rowcount}")
+        conn.commit()
+        print("Delete operation completed.")
+        
     except Exception as e:
         print(f"Deletion error: {e}")
         conn.rollback()
     finally:
         cur.close()
         conn.close()
+
         
 def main():
     create_phonebook2_table()
+    create_search_function()
+    insert_or_update_user()
+    insert_many_users()
+    get_phonebook_paginated()
+    delete_from_phonebook_procedure()
     while True:
         print("\nPhoneBook Menu:")
         print("1. Add data from CSV")
